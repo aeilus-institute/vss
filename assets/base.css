@@ -1,0 +1,10 @@
+/* Standalone pages of the ÆVRI value tools: the institute's colour tokens, a plain page around the editor. */
+:root{--av-line:#d9e2df;--av-ink:#10282a;--av-muted:#5b6f6c;--av-accent:#176B68;--av-soft:#e7f2f0;--av-surface:#fff;--av-paper:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:#f8faf9;color:#10282a;font:15px/1.5 Inter,"Segoe UI",system-ui,-apple-system,sans-serif}
+a{color:#176B68}
+.pk-main{max-width:1200px;margin:0 auto;padding:16px}
+.pk-wide{max-width:none}
+.pk-h1{font-size:24px;margin:8px 0 16px}
+.pk-list{line-height:2}
+.pk-foot{padding:16px;text-align:center;font-size:12px;color:#5b6f6c}

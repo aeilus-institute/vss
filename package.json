@@ -1,0 +1,18 @@
+{
+  "name": "@aevri/value-tools",
+  "version": "1.0.0",
+  "description": "ÆVRI value tools: VET (Value Estimation Tool) and VSS (Value System Schema editor). Plain ES modules, no build step.",
+  "license": "Apache-2.0",
+  "author": "Aeilus Value Research Institute (ÆVRI) <https://aeilus.institute/>",
+  "homepage": "https://aeilus.institute/tools/",
+  "type": "module",
+  "exports": {
+    "./vet-core": "./vet/assets/vet-core.js",
+    "./vss-core": "./vss/assets/vss-core.js",
+    "./api": "./assets/aevri-api.js",
+    "./contracts/*": "./contracts/*"
+  },
+  "files": ["index.html", "vet/", "vss/", "assets/", "contracts/", "team/", "README.md", "README.ru.md", "LICENSE", "NOTICE", "CHANGELOG.md"],
+  "keywords": ["value", "estimation", "prioritization", "value-stream", "sankey", "backlog", "vet", "vss"],
+  "scripts": { "start": "python -m http.server 8080" }
+}

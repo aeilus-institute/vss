@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aeilus.institute/contracts/vss.schema.json",
+  "title": "VSS document (.vss.json), format aevri.vss 1.x",
+  "description": "Value System Schema (VSS spec 6.1): converters (nodes), flows of value and anti-value, element types, texts, and integrations (VET results per flow). Files of editor 2.x without 'format' are migrated by the editor with a report.",
+  "type": "object",
+  "required": ["format", "schemaVersion", "schema", "nodes", "flows"],
+  "properties": {
+    "format": { "const": "aevri.vss" },
+    "schemaVersion": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "schema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "description": { "type": "string" }, "version": { "type": "string" }, "author": { "type": "string" }, "created_at": { "type": "string" }, "updated_at": { "type": "string" } } },
+    "nodes": { "type": "array", "items": { "type": "object", "required": ["id", "name", "position"], "properties": {
+      "id": { "type": "string" }, "name": { "type": "string" }, "description": { "type": "string" },
+      "position": { "type": "object", "required": ["x", "y"], "properties": { "x": { "type": "number" }, "y": { "type": "number" } } },
+      "size": { "type": "object", "properties": { "width": { "type": "number" }, "height": { "type": "number" } } },
+      "bpmn_link": { "type": "string" }, "link": { "type": "string" }, "attributes": { "type": "object" } } } },
+    "flows": { "type": "array", "items": { "type": "object", "required": ["id"], "properties": {
+      "id": { "type": "string" }, "name": { "type": "string" }, "description": { "type": "string" },
+      "source_node_id": { "type": ["string", "null"], "description": "null = external input" }, "target_node_id": { "type": ["string", "null"], "description": "null = external output" },
+      "value": { "type": ["number", "null"] }, "unit": { "type": "string" }, "color": { "type": "string" }, "show_label": { "type": "boolean" },
+      "type": { "type": "string" }, "routing_mode": { "enum": ["all", "selected"] }, "element_type_ids": { "type": "array", "items": { "type": "string" } },
+      "attributes": { "type": "object" } } } },
+    "elements": { "type": "array", "description": "element types (value / anti-value) with their location: in a node or on a flow", "items": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "kind": { "enum": ["value", "anti_value"] }, "location": { "type": "string" }, "node_id": { "type": ["string", "null"] }, "flow_id": { "type": ["string", "null"] }, "quantity": { "type": ["number", "null"] }, "unit": { "type": "string" } } } },
+    "texts": { "type": "array", "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "text": { "type": "string" }, "position": { "type": "object" }, "color": { "type": "string" } } } },
+    "integrations": { "type": "object", "properties": { "vet": { "type": "object", "properties": { "bindings": { "type": "object", "description": "{flowId: VET result binding (vet-bridge.schema.json #/$defs/result plus receivedAt, stale, boardSnapshot)}" } } } } },
+    "extensions": { "type": "object" }
+  }
+}

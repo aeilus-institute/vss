@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aeilus.institute/contracts/board.schema.json",
+  "title": "VET Board (.vet.json), schemaVersion 1.x",
+  "description": "One estimation board of the Value Estimation Tool (VET spec section 3). Item texts are never translated; axis, type and bucket labels are dictionaries by language.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "axes", "itemTypes", "items", "estimates"],
+  "properties": {
+    "schemaVersion": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "id": { "type": "string", "description": "UUID v7" },
+    "title": { "type": "string", "maxLength": 120 },
+    "description": { "type": "string" },
+    "mode": { "enum": ["solo", "team"] },
+    "view": { "enum": ["1d", "2d"] },
+    "priority": { "enum": ["ratio", "difference", "out"], "description": "DM-1: out / in, out - in, or out only" },
+    "aggregation": { "enum": ["median", "mean", "facilitator"] },
+    "lang": { "type": "string" },
+    "axes": {
+      "type": "object",
+      "required": ["out", "in"],
+      "properties": { "out": { "$ref": "#/$defs/axis" }, "in": { "$ref": "#/$defs/axis" } }
+    },
+    "itemTypes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/itemType" } },
+    "items": { "type": "array", "maxItems": 5000, "items": { "$ref": "#/$defs/item" } },
+    "participants": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "displayName": { "type": "string" }, "role": { "type": "string" } } } },
+    "estimates": { "type": "array", "items": { "$ref": "#/$defs/estimate" } },
+    "finals": { "type": "object", "description": "MO-13: facilitator's fixed values {itemId: {out?, in?}}", "additionalProperties": { "type": "object", "properties": { "out": { "type": "number" }, "in": { "type": "number" } } } },
+    "goals": { "type": "array" },
+    "metrics": { "type": "array" },
+    "formulas": { "type": "array" },
+    "settings": { "type": "object", "properties": { "bucketsOnly": { "type": "boolean" }, "swapAxes": { "type": "boolean" }, "guides": { "enum": ["selected", "all"] }, "quadrants": { "type": "object" } } },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  },
+  "$defs": {
+    "labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "{language code: text}" },
+    "axis": {
+      "type": "object",
+      "required": ["scale", "buckets"],
+      "properties": {
+        "key": { "enum": ["out", "in"] },
+        "label": { "$ref": "#/$defs/labels" },
+        "unit": { "type": "string" },
+        "scale": {
+          "type": "object",
+          "required": ["min", "max", "step"],
+          "properties": {
+            "min": { "type": "number", "minimum": -1e9 }, "max": { "type": "number", "maximum": 1e9 },
+            "step": { "enum": [0.1, 0.25, 0.5, 1, 2, 5, 10, 100, 1000] },
+            "type": { "enum": ["linear", "list"] }, "list": { "type": ["array", "null"] }
+          }
+        },
+        "buckets": { "type": "array", "items": { "type": "object", "required": ["id", "label", "from", "to"], "properties": {
+          "id": { "type": "string" }, "label": { "type": "string" }, "from": { "type": "number" }, "to": { "type": "number" },
+          "color": { "type": "string" }, "polarity": { "enum": ["value", "anti"] } } } },
+        "autoscale": { "type": "object" }
+      }
+    },
+    "itemType": {
+      "type": "object",
+      "required": ["id"],
+      "properties": { "id": { "type": "string" }, "name": { "$ref": "#/$defs/labels" }, "pluralName": { "$ref": "#/$defs/labels" }, "prefix": { "type": "string" },
+        "color": { "type": "string" }, "icon": { "type": "string" }, "defaultPolarity": { "enum": ["value", "anti"] }, "lib": { "type": "string" } }
+    },
+    "item": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" }, "code": { "type": "string", "maxLength": 24 }, "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 5000 }, "typeId": { "type": "string" }, "polarity": { "enum": ["value", "anti"] },
+        "tags": { "type": "array", "items": { "type": "string" } }, "links": { "type": "array", "items": { "type": "string" } },
+        "flowRef": { "type": ["object", "null"], "properties": { "vssSchemaId": { "type": "string" }, "flowId": { "type": "string" }, "flowLabel": { "type": "string" } } },
+        "ledgerRef": { "type": ["object", "null"] }, "goalIds": { "type": "array" }, "externalId": { "type": "string" }, "isReference": { "type": "boolean" }
+      }
+    },
+    "estimate": {
+      "type": "object",
+      "required": ["itemId", "axis", "participantId", "value"],
+      "properties": { "itemId": { "type": "string" }, "axis": { "enum": ["in", "out"] }, "participantId": { "type": "string" }, "value": { "type": "number" },
+        "source": { "type": "string" }, "updatedAt": { "type": "string" } }
+    }
+  }
+}
