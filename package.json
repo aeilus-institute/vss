@@ -1,6 +1,6 @@
 {
   "name": "@aevri/value-tools",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ÆVRI value tools: VET (Value Estimation Tool) and VSS (Value System Schema editor). Plain ES modules, no build step.",
   "license": "Apache-2.0",
   "author": "Aeilus Value Research Institute (ÆVRI) <https://aeilus.institute/>",

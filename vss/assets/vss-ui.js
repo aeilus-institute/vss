@@ -5,6 +5,7 @@
 
 const root = document.getElementById('vss');
 const V = root.dataset.v || '1';
+if (root.dataset.theme) document.documentElement.setAttribute('data-tools-theme', root.dataset.theme); // dark | auto (packages); the site stays light
 const C = await import('./vss-core.js?v=' + V);
 const LANG = (document.documentElement.lang || 'en').slice(0, 2);
 const LOCALES = ['en', 'ru', 'uk', 'el', 'de', 'fr', 'es', 'pt', 'it', 'nl', 'pl', 'ro', 'sv', 'tr', 'ar', 'he', 'hi', 'zh', 'ja', 'ko'];
@@ -34,6 +35,10 @@ function h(tag, attrs = {}, ...kids) {
 }
 function s(tag, attrs = {}) { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) el.setAttribute(k, v); return el; }
 const ICON = {
+  open: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  save: '<path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M8 3v5h7V3M8 21v-6h8v6"/>',
+  download: '<path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.4l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/>',
   arrow: '<path d="M4 4l7.07 17 2.51-7.39L21 11.07z"/>', undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>', redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
   node: '<rect x="3" y="6" width="18" height="12" rx="3"/><path d="M12 9v6M9 12h6"/>', text: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
@@ -46,6 +51,7 @@ function btn(label, onClick, { ic, cls = '', title, pressed, disabled } = {}) {
   if (ic) b.append(icon(ic));
   if (label) b.append(h('span', { text: label }));
   if (ic && !label) b.setAttribute('aria-label', title || '');
+  if (ic && label) b.setAttribute('aria-label', label); // the label hides below 900 px (CSS), the name stays
   return b;
 }
 
@@ -130,44 +136,79 @@ function build() {
   ui.main = h('div', { class: 'vss-main' }, h('div', { class: 'vss-stage' }, ui.svg), ui.panelToggle, ui.panel);
   ui.status = h('div', { class: 'vss-status' });
   ui.toasts = h('div', { class: 'vss-toasts', 'aria-live': 'polite' });
-  root.append(ui.bar, ui.title, ui.main, ui.status, ui.toasts);
+  ui.saveSlot = h('span', { class: 'vss-save-slot' });
+  root.append(ui.bar, h('div', { class: 'vss-titlerow' }, ui.title, ui.saveSlot), ui.main, ui.status, ui.toasts);
   bindCanvas();
 }
 
-function renderChrome() {
-  // toolbar (UI-1, UI-2)
-  const menuBtn = h('button', { type: 'button', class: 'vss-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }, h('span', { text: t('menu.schema') }), icon('menu'));
-  const ro = srv && !srv.canEdit;
-  const list = h('div', { class: 'vss-menu-list', role: 'menu', hidden: true },
-    srv ? null : item(t('menu.new'), cmdNew), ro ? null : item(t('menu.open'), () => pickFile('open')), ro ? null : item(t('menu.merge'), () => pickFile('merge'), t('menu.mergeHint')),
-    srv || !SERVER ? null : item(t('menu.saveInstitute'), saveToInstitute, t('menu.saveInstituteHint')),
-    srv && srv.canEdit ? item(t('srv.saveVersion'), async () => { try { await srv.saveVersion(); toast(t('srv.versionSaved')); } catch (e) { toast(t('srv.error') + ' ' + (e.code || '')); } }) : null,
-    srv && srv.canEdit ? item(t('srv.versions'), openVersions) : null,
-    srv && srv.isOwner ? item(t('srv.share'), openSchemaShare) : null,
-    srv && root.dataset.user ? item(t('srv.duplicate'), async () => { try { location.href = localHref('/tools/vss/s/' + await srv.duplicate() + '/'); } catch (e) { toast(t('srv.error') + ' ' + (e.code || '')); } }) : null,
-    root.dataset.user ? item(t('srv.mySchemas'), () => { location.href = localHref('/tools/vss/schemas/'); }) : null,
-    h('hr'),
-    item(t('menu.exportJson'), exportJson), item(t('menu.exportPng'), exportPng));
-  function item(label, fn, hint) {
-    return h('button', { type: 'button', role: 'menuitem', class: 'vss-menu-item', disabled: fn ? null : true, onclick: () => { close(); fn && fn(); } }, h('span', { text: label }), hint ? h('small', { text: hint }) : null);
-  }
+/** A dropdown menu with arrow keys, Home / End and Escape. entries: [label, fn, hint] or 'hr' or null. */
+function vmenu(label, ic, entries, { primary = false } = {}) {
+  const menuBtn = h('button', { type: 'button', class: 'vss-btn' + (primary ? ' vss-btn-primary' : ''), 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': label }, ic ? icon(ic) : null, h('span', { text: label }), icon('menu'));
+  const list = h('div', { class: 'vss-menu-list', role: 'menu', hidden: true }, entries.filter(Boolean).map((e) => (e === 'hr' ? h('hr') :
+    h('button', { type: 'button', role: 'menuitem', class: 'vss-menu-item', disabled: e[1] ? null : true, onclick: () => { close(); e[1] && e[1](); } }, h('span', { text: e[0] }), e[2] ? h('small', { text: e[2] }) : null))));
   const close = () => { list.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); };
-  menuBtn.onclick = (e) => { e.stopPropagation(); list.hidden = !list.hidden; menuBtn.setAttribute('aria-expanded', String(!list.hidden)); };
-  closeMenu = close; // one document listener for all renders (audit: a listener was added on every render)
-  ui.bar.replaceChildren(
-    h('div', { class: 'vss-menu-wrap' }, menuBtn, list),
-    btn('', undo, { ic: 'undo', title: t('undo') + ' (Ctrl+Z)', disabled: !undoStack.length }),
-    btn('', redo, { ic: 'redo', title: t('redo') + ' (Ctrl+Shift+Z)', disabled: !redoStack.length }),
+  const items = () => [...list.querySelectorAll('.vss-menu-item:not([disabled])')];
+  menuBtn.onclick = (e) => { e.stopPropagation(); const open = list.hidden; closeMenus(); list.hidden = !open; menuBtn.setAttribute('aria-expanded', String(open)); if (open && e.detail === 0) items()[0]?.focus(); };
+  menuBtn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); closeMenus(); list.hidden = false; menuBtn.setAttribute('aria-expanded', 'true'); items()[0]?.focus(); } });
+  list.addEventListener('keydown', (e) => {
+    const all = items(), i = all.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); menuBtn.focus(); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); all[(i + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus(); }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); (e.key === 'Home' ? all[0] : all[all.length - 1])?.focus(); }
+    else if (e.key === 'Tab') close();
+  });
+  menuClosers.push(close);
+  return h('div', { class: 'vss-menu-wrap' }, menuBtn, list);
+}
+let menuClosers = [];
+const closeMenus = () => menuClosers.forEach((c) => c());
+
+/** Toolbar (UX refactoring 2026-10-21): the main file actions in sight, the modes explained, the rest under More. */
+function renderChrome() {
+  const ro = srv && !srv.canEdit;
+  menuClosers = [];
+  closeMenu = closeMenus; // one document listener for all renders (audit: a listener was added on every render)
+  const saveState = srv ? h('span', { class: 'vss-save-state vss-badge is-' + srv.status, role: 'status', text: t('srv.status.' + srv.status) + (srv.status === 'saved' && srv.savedAt ? ' ' + srv.savedAt.toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' }) : '') + (srv.canEdit ? '' : ' · ' + t('srv.role.' + srv.role)) })
+    : h('span', { class: 'vss-save-state vss-badge' + (st.dirty ? ' is-dirty' : ''), role: 'status', title: st.dirty ? t('notice.unsaved') : (st.exported ? t('notice.exported') : t('notice.solo')),
+      text: st.dirty ? t('notice.unsavedShort') : (st.exported ? t('notice.exportedShort') : t('notice.soloBadge')) });
+  ui.bar.replaceChildren(...[
+    ro ? null : btn(t('menu.open'), () => pickFile('open'), { ic: 'open' }),
+    srv || !SERVER || ro ? null : btn(t('menu.saveInstituteShort'), saveToInstitute, { ic: 'save', cls: 'vss-btn-primary', title: t('menu.saveInstituteHint') }),
+    vmenu(t('menu.export'), 'download', [[t('menu.exportJson'), exportJson], [t('menu.exportPng') + '…', exportPng], [t('menu.exportSvg'), exportSvg]]),
+    srv && srv.isOwner ? btn(t('srv.share'), openSchemaShare, { ic: 'share' }) : null,
     h('span', { class: 'vss-sep' }),
     btn(t('tool.hand'), () => setTool('hand'), { ic: 'hand', pressed: st.tool === 'hand', title: t('tool.handHint') + ' (H)' }),
     btn(t('tool.arrow'), () => setTool('arrow'), { ic: 'arrow', pressed: st.tool === 'arrow', title: t('tool.arrowHint') + ' (V)' }),
+    ro ? null : h('span', { class: 'vss-sep' }),
+    ro ? null : btn(t('add.converter'), addConverter, { ic: 'node' }),
+    ro ? null : btn(t('add.text'), addText, { ic: 'text' }),
     h('span', { class: 'vss-sep' }),
-    btn(t('add.converter'), addConverter, { ic: 'node' }),
-    btn(t('add.text'), addText, { ic: 'text' }),
+    btn('', undo, { ic: 'undo', title: t('undo') + ' (Ctrl+Z)', disabled: !undoStack.length }),
+    btn('', redo, { ic: 'redo', title: t('redo') + ' (Ctrl+Shift+Z)', disabled: !redoStack.length }),
     h('span', { class: 'vss-grow' }),
-    srv ? h('span', { class: 'vss-save-state is-' + srv.status, text: t('srv.status.' + srv.status) + (srv.status === 'saved' && srv.savedAt ? ' ' + srv.savedAt.toLocaleTimeString(LOC, { hour: '2-digit', minute: '2-digit' }) : '') + (srv.canEdit ? '' : ' · ' + t('srv.role.' + srv.role)) })
-      : h('span', { class: 'vss-save-state' + (st.dirty ? ' is-dirty' : ''), text: st.dirty ? t('notice.unsaved') : (st.exported ? t('notice.exported') : t('notice.solo')) }),
-    btn(t('help'), openHelp, { ic: 'help' }));
+    btn('', openHelp, { ic: 'help', title: t('help') }),
+    vmenu(t('more'), null, [
+      srv ? null : [t('menu.new'), cmdNew], ro ? null : [t('menu.merge'), () => pickFile('merge'), t('menu.mergeHint')],
+      srv && srv.canEdit ? [t('srv.saveVersion'), async () => { try { await srv.saveVersion(); toast(t('srv.versionSaved')); } catch (e) { toast(t('srv.error') + ' ' + (e.code || '')); } }] : null,
+      srv && srv.canEdit ? [t('srv.versions'), openVersions] : null,
+      srv && root.dataset.user ? [t('srv.duplicate'), async () => { try { location.href = localHref('/tools/vss/s/' + await srv.duplicate() + '/'); } catch (e) { toast(t('srv.error') + ' ' + (e.code || '')); } }] : null,
+      root.dataset.user ? [t('srv.mySchemas'), () => { location.href = localHref('/tools/vss/schemas/'); }] : null,
+    ]),
+  ].filter(Boolean));
+  ui.saveSlot.replaceChildren(saveState); // next to the title: always visible, also on phones
+  // first steps (onboarding): one converter and nothing between converters yet
+  const stage = ui.main.querySelector('.vss-stage');
+  let hint = stage.querySelector('.vss-start');
+  let hidden = false; try { hidden = sessionStorage.getItem('vss.start') === 'off'; } catch (e) { hidden = false; }
+  const fresh = st.doc.nodes.length <= 1 && !st.doc.flows.some((f) => f.source_node_id && f.target_node_id) && !(srv && !srv.canEdit) && !hidden;
+  if (!fresh) hint?.remove();
+  else if (!hint) {
+    hint = h('div', { class: 'vss-start', role: 'note' }, h('strong', { text: t('start.title') }),
+      h('ol', {}, ['start.s1', 'start.s2', 'start.s3'].map((k) => h('li', { text: t(k) }))),
+      h('div', { class: 'vss-row' }, btn(t('start.addNext'), () => { const n0 = st.doc.nodes[0]; if (n0) addNext(n0); else addConverter(); }, { cls: 'vss-btn-primary vss-btn-sm' }),
+        btn(t('start.hide'), () => { try { sessionStorage.setItem('vss.start', 'off'); } catch (e) { /* private mode */ } hint.remove(); }, { cls: 'vss-btn-sm' })));
+    stage.append(hint);
+  }
   // title (UI-3)
   ui.title.textContent = st.doc.schema.title || t('untitled');
   ui.title.title = t('title.hint');
@@ -236,7 +277,8 @@ function layout() {
   const stackH = (list) => (list || []).reduce((a, f) => a + thick(f), 0) + GAP * Math.max(0, (list || []).length - 1);
   for (const [id, nl] of L.nodes) {
     nl.h = Math.max(nl.h, stackH(outs.get(id)) + 20, stackH(ins.get(id)) + 20);
-    nl.n.size = { width: Math.round(nl.w), height: Math.round(nl.h) };
+    const sz = { width: Math.round(nl.w), height: Math.round(nl.h) };
+    if (!nl.n.size || nl.n.size.width !== sz.width || nl.n.size.height !== sz.height) nl.n.size = sz; // written only when it changes (ARCH-7: a render alone never dirties the schema)
     nl.x0 = nl.n.position.x - nl.w / 2; nl.x1 = nl.n.position.x + nl.w / 2; nl.y0 = nl.n.position.y - nl.h / 2; nl.y1 = nl.n.position.y + nl.h / 2;
   }
   const portY = (nodeId, list, f) => {
@@ -245,7 +287,26 @@ function layout() {
     for (const g of list) { if (g === f) return y + thick(g) / 2; y += thick(g) + GAP; }
     return n.n.position.y;
   };
-  let lane = 0;
+  // GEO-4: obstacles = other converters inflated by a margin; a forward curve that crosses one becomes an
+  // orthogonal detour above or below them; when no detour is free the flow is marked and the panel warns.
+  const PAD = 10;
+  const rects = [...L.nodes.values()].map((nl) => ({ id: nl.n.id, x0: nl.x0 - PAD, x1: nl.x1 + PAD, y0: nl.y0 - PAD, y1: nl.y1 + PAD }));
+  const inRect = (x, y, r) => x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1;
+  const segHits = (a, b, r) => { // axis-aligned segment against a rectangle
+    if (a[0] === b[0]) return a[0] > r.x0 && a[0] < r.x1 && Math.max(a[1], b[1]) > r.y0 && Math.min(a[1], b[1]) < r.y1;
+    return a[1] > r.y0 && a[1] < r.y1 && Math.max(a[0], b[0]) > r.x0 && Math.min(a[0], b[0]) < r.x1;
+  };
+  const blockedBy = (pts, skip) => rects.filter((r) => !skip.has(r.id)).some((r) => pts.slice(1).some((p, i) => segHits(pts[i], p, r)));
+  const curveHits = (sx, sy, dx, lx, ey, skip) => {
+    for (let i = 1; i < 40; i++) {
+      const u = i / 40, v = 1 - u;
+      const x = v * v * v * sx + 3 * v * v * u * (sx + dx) + 3 * v * u * u * (lx - dx) + u * u * u * lx;
+      const y = v * v * v * sy + 3 * v * v * u * sy + 3 * v * u * u * ey + u * u * u * ey;
+      if (rects.some((r) => !skip.has(r.id) && inRect(x, y, r))) return true;
+    }
+    return false;
+  };
+  let lane = 0, detour = 0;
   for (const f of doc.flows) {
     if (f.attributes && f.attributes.is_unbound) continue;
     const src = f.source_node_id ? L.nodes.get(f.source_node_id) : null, tgt = f.target_node_id ? L.nodes.get(f.target_node_id) : null;
@@ -256,11 +317,23 @@ function layout() {
     if (src) { sx = src.x1; sy = portY(src.n.id, outs.get(src.n.id), f); } else { ex = tgt.x0; ey = portY(tgt.n.id, ins.get(tgt.n.id), f); sx = ex - 110; sy = ey; }
     if (tgt) { ex = tgt.x0; ey = portY(tgt.n.id, ins.get(tgt.n.id), f); } else { ex = sx + 110; ey = sy; }
     const lx = ex - arrowLen; // the band ends at the arrow base (GEO-5)
-    let d, pts;
+    let d, pts, blocked = false;
     const back = src && tgt && (src.n.id === tgt.n.id || sx + 30 > ex);
+    const skip = new Set([src && src.n.id, tgt && tgt.n.id].filter(Boolean));
     if (!back) {
       const dx = Math.max(30, (lx - sx) / 2);
       d = `M ${sx} ${sy} C ${sx + dx} ${sy}, ${lx - dx} ${ey}, ${lx} ${ey}`; // GEO-2
+      if (curveHits(sx, sy, dx, lx, ey, skip)) { // GEO-4: around the converters in the corridor, the shorter side first
+        const c = 16 + (detour % 4) * 6;
+        const xa = sx + c, xb = lx - c;
+        const corridor = rects.filter((r) => !skip.has(r.id) && r.x1 > Math.min(xa, xb) && r.x0 < Math.max(xa, xb));
+        const top = Math.min(...corridor.map((r) => r.y0)) - 6 - detour * (th + 6), bot = Math.max(...corridor.map((r) => r.y1)) + 6 + detour * (th + 6);
+        const route = (y) => [[sx, sy], [xa, sy], [xa, y], [xb, y], [xb, ey], [lx, ey]];
+        const options = [top, bot].sort((p, q) => Math.abs(p - sy) + Math.abs(p - ey) - Math.abs(q - sy) - Math.abs(q - ey)).map(route);
+        const free = xb > xa + 4 ? options.find((o) => !blockedBy(o, skip)) : null;
+        if (free) { pts = free; d = 'M ' + pts.map((p) => p.join(' ')).join(' L '); detour++; }
+        else blocked = true;
+      }
     } else {
       // GEO-3: right, down below every converter in the corridor, left past the target, up to the port, right into it
       const c = 22 + (lane % 6) * 8;
@@ -271,8 +344,9 @@ function layout() {
       lane++;
       pts = [[sx, sy], [sx + c, sy], [sx + c, ly], [ex - c - arrowLen, ly], [ex - c - arrowLen, ey], [lx, ey]];
       d = 'M ' + pts.map((p) => p.join(' ')).join(' L ');
+      blocked = blockedBy(pts, skip);
     }
-    L.flows.set(f.id, { f, d, th, ex, ey, arrowLen, arrowHalf });
+    L.flows.set(f.id, { f, d, th, ex, ey, arrowLen, arrowHalf, blocked });
   }
   return L;
 }
@@ -290,7 +364,8 @@ function renderDiagram() {
     const f = fl.f;
     const selected = st.sel.type === 'flow' && st.sel.id === f.id;
     const color = f.color || '#888888';
-    const g = s('g', { class: 'vss-flow' + (selected ? ' is-selected' : ''), 'data-type': 'flow', 'data-id': f.id });
+    const g = s('g', { class: 'vss-flow' + (selected ? ' is-selected' : '') + (fl.blocked ? ' is-blocked' : ''), 'data-type': 'flow', 'data-id': f.id });
+    if (fl.blocked) { const tt = s('title'); tt.textContent = t('geo.blocked'); g.append(tt); }
     const hit = s('path', { d: fl.d, class: 'vss-hit', stroke: 'transparent', 'stroke-width': fl.th + 12, fill: 'none' });
     const p = s('path', { d: fl.d, stroke: color, 'stroke-width': fl.th, fill: 'none', 'stroke-linejoin': 'round' });
     const arrow = s('polygon', { points: `${fl.ex},${fl.ey} ${fl.ex - fl.arrowLen},${fl.ey - fl.arrowHalf} ${fl.ex - fl.arrowLen},${fl.ey + fl.arrowHalf}`, fill: color }); // GEO-6
@@ -329,6 +404,21 @@ function renderDiagram() {
     g.append(te);
     if (n.bpmn_link || n.link) g.append(s('circle', { cx: nl.x1 - 8, cy: nl.y0 + 8, r: 3, fill: '#176B68' }));
     nodesG.append(g);
+  }
+  const one = st.sel.type === 'node' && st.nodes.size <= 1 && !st.connectFrom && !(srv && !srv.canEdit) ? L.nodes.get(st.sel.id) : null;
+  if (one) { // NODE-3 SHOULD: the most used actions next to the selected converter
+    const acts = converterActions(one.n).filter((a) => a.main).map((a) => [a.sym, a.label, a.fn]);
+    const bar = s('g', { class: 'vss-nodeacts' });
+    acts.forEach(([sym, label, fn], i) => {
+      const b = s('g', { class: 'vss-nodeact', transform: `translate(${one.x0 + 14 + i * 30} ${one.y0 - 18})`, role: 'button', tabindex: '0', 'aria-label': label });
+      const tt = s('title'); tt.textContent = label;
+      const tx = s('text', { 'text-anchor': 'middle', y: 5, 'font-size': 14, 'font-weight': 700 }); tx.textContent = sym;
+      b.append(tt, s('circle', { r: 12 }), tx);
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } });
+      bar.append(b);
+    });
+    labelsG.append(bar);
   }
   for (const x of doc.texts) {
     const selected = st.sel.type === 'text' && st.sel.id === x.id;
@@ -389,7 +479,7 @@ let gesture = null;
 function bindCanvas() {
   const svg = ui.svg;
   svg.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.target.closest('.vss-nodeact')) return;
     svg.focus({ preventScroll: true });
     const hitEl = e.target.closest('[data-type]');
     const type = hitEl ? hitEl.getAttribute('data-type') : null, id = hitEl ? hitEl.getAttribute('data-id') : null;
@@ -455,6 +545,7 @@ function bindCanvas() {
     ui.svg.classList.remove('is-panning');
     if (!g) return;
     if ((g.kind === 'drag' || g.kind === 'text') && g.moved) { pushHistory(g.before); touch(); renderChrome(); } // one drag = one Undo (CAN-3)
+    else if (!g.moved && st.sel.type !== 'schema' && !st.panelOpen && matchMedia('(max-width: 900px)').matches) { st.panelOpen = true; renderChrome(); } // a tap opens the inspector on narrow screens
     else if (g.kind === 'pan' && !g.moved) select('schema'); // a short click on empty space (CAN-2)
     else if (g.kind === 'band') {
       g.rect.remove();
@@ -477,7 +568,13 @@ function bindCanvas() {
   document.addEventListener('keydown', (e) => {
     if (document.querySelector('dialog[open]')) return;
     const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
-    if (e.key === 'Escape') { if (st.connectFrom) cancelConnect(); if (gesture && gesture.kind === 'band') { gesture.rect.remove(); gesture = null; } return; }
+    if (e.key === 'Escape') {
+      if (st.connectFrom) cancelConnect();
+      if (gesture && gesture.kind === 'band') { gesture.rect.remove(); gesture = null; }
+      if (gesture && gesture.kind === 'drag') { gesture.items.forEach((it) => { it.n.position.x = it.x; it.n.position.y = it.y; }); gesture = null; renderDiagram(); } // CAN-7: Escape puts the nodes back
+      if (gesture && gesture.kind === 'text') { gesture.x.x = gesture.ox; gesture.x.y = gesture.oy; gesture = null; renderDiagram(); }
+      return;
+    }
     if (inField) return; // Ctrl+Z inside a field undoes the typing, not the schema (SAVE-10)
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
@@ -485,6 +582,14 @@ function bindCanvas() {
     else if (!e.ctrlKey && !e.metaKey && k === 'h') setTool('hand');
     else if (!e.ctrlKey && !e.metaKey && k === 'v') setTool('arrow');
     else if (e.key === 'Delete' || e.key === 'Backspace') { if (root.contains(e.target) || e.target === document.body) { e.preventDefault(); deleteSelection(); } }
+    else if (e.key.startsWith('Arrow') && !e.ctrlKey && !e.metaKey && (e.target === ui.svg || e.target === document.body) && !(srv && !srv.canEdit)) { // only when the canvas has the focus
+      const step = e.shiftKey ? 1 : 10, dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0, dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      const nodes = [...st.nodes].map((id) => C.nodeById(st.doc, id)).filter(Boolean);
+      const text = st.sel.type === 'text' ? C.textById(st.doc, st.sel.id) : null;
+      if (!nodes.length && !text) return;
+      e.preventDefault();
+      act(() => { nodes.forEach((n) => { n.position.x += dx; n.position.y += dy; }); if (text) { text.x += dx; text.y += dy; } });
+    }
   });
 }
 
@@ -541,17 +646,23 @@ function addText() { // TEXT-1: in the centre of the visible scene
 }
 function deleteSelection() {
   const { type, id } = st.sel;
-  if (st.nodes.size > 1) { act(() => { [...st.nodes].forEach((nid) => C.deleteNode(st.doc, nid)); st.nodes.clear(); st.sel = { type: 'schema', id: null }; }); return; }
+  if (st.nodes.size > 1) {
+    const bound = st.doc.flows.filter((f) => (st.nodes.has(f.source_node_id) || st.nodes.has(f.target_node_id)) && st.doc.integrations.vet.bindings[f.id]).length;
+    if (bound) { askBox(t('del.vetAsk', { n: bound }), t('delete')).then((yes) => { if (yes) { act(() => { [...st.nodes].forEach((nid) => C.deleteNode(st.doc, nid)); st.nodes.clear(); st.sel = { type: 'schema', id: null }; }); } }); return; } // DEL-4
+    act(() => { [...st.nodes].forEach((nid) => C.deleteNode(st.doc, nid)); st.nodes.clear(); st.sel = { type: 'schema', id: null }; }); return; }
   if (type === 'node') deleteNode(id);
   else if (type === 'flow') deleteFlow(id);
   else if (type === 'text') act(() => { st.doc.texts = st.doc.texts.filter((x) => x.id !== id); st.sel = { type: 'schema', id: null }; });
 }
-function deleteNode(id) {
+async function deleteNode(id) {
+  const bound = st.doc.flows.filter((f) => (f.source_node_id === id || f.target_node_id === id) && st.doc.integrations.vet.bindings[f.id]).length;
+  if (bound && !(await askBox(t('del.vetAsk', { n: bound }), t('delete')))) return; // DEL-4: warn before losing VET results
   let r;
   act(() => { r = C.deleteNode(st.doc, id); st.nodes.delete(id); st.sel = { type: 'schema', id: null }; });
   toast(t('deleted.node', { flows: r.removedFlows, detached: r.detached }) + (r.unbound ? ' ' + t('deleted.unbound', { n: r.unbound }) : ''), undo);
 }
-function deleteFlow(id) {
+async function deleteFlow(id) {
+  if (st.doc.integrations.vet.bindings[id] && !(await askBox(t('del.vetAsk', { n: 1 }), t('delete')))) return; // DEL-4
   act(() => { st.doc.flows = st.doc.flows.filter((f) => f.id !== id); st.sel = { type: 'schema', id: null }; });
   if (st.doc.integrations.vet.bindings[id]) toast(t('deleted.flowVet'), undo); // DEL-3: the VET board itself is not touched
 }
@@ -576,16 +687,23 @@ function fCheck(label, checked, onChange) {
   const cb = h('input', { type: 'checkbox', checked: checked || null, onchange: () => onChange(cb.checked) });
   return h('label', { class: 'vss-check' }, cb, h('span', { text: label }));
 }
-const section = (title, ...kids) => h('section', { class: 'vss-section' }, h('h3', { text: title }), ...kids);
+/** Inspector sections fold; the state is kept per section title in this browser (UX refactoring). */
+const secOpen = (() => { try { return JSON.parse(localStorage.getItem('vss.sections') || '{}'); } catch (e) { return {}; } })();
+const section = (title, ...kids) => h('details', { class: 'vss-section', open: secOpen[title] === false ? null : true,
+  ontoggle: (e) => { secOpen[title] = e.target.open; try { localStorage.setItem('vss.sections', JSON.stringify(secOpen)); } catch (x) { /* private mode */ } } },
+h('summary', {}, h('h3', { text: title })), ...kids);
 const idLine = (id) => h('p', { class: 'vss-id' }, 'ID: ', h('code', { text: id }));
 
 function renderPanel() {
   ui.panel.replaceChildren();
   const { type, id } = st.sel;
-  if (type === 'node' && st.nodes.size <= 1) { const n = C.nodeById(st.doc, id); if (n) return panelNode(n); }
-  if (type === 'flow') { const f = C.flowById(st.doc, id); if (f) return panelFlow(f); }
-  if (type === 'text') { const x = C.textById(st.doc, id); if (x) return panelText(x); }
-  panelSchema();
+  const n = type === 'node' && st.nodes.size <= 1 ? C.nodeById(st.doc, id) : null, f = type === 'flow' ? C.flowById(st.doc, id) : null, x = type === 'text' ? C.textById(st.doc, id) : null;
+  if (n) panelNode(n); else if (f) panelFlow(f); else if (x) panelText(x); else panelSchema();
+  if (n || f || x) ui.panel.append(objectsSection()); // the schema panel adds it itself
+  if (srv && !srv.canEdit) { // a viewer sees the fields but cannot change them (instead of changes put back afterwards)
+    ui.panel.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+    ui.panel.querySelectorAll('.vss-section button:not(.vss-link)').forEach((el) => { el.disabled = true; });
+  }
 }
 
 function panelSchema() {
@@ -608,13 +726,41 @@ function panelSchema() {
         h('option', { value: '', text: t('unbound.reconnect') }), d.nodes.map((n) => h('option', { value: n.id, text: n.name }))),
       btn('', () => deleteFlow(f.id), { ic: 'x', title: t('delete'), cls: 'vss-btn-icon' })))));
   if (st.report.length) ui.panel.append(section(t('report.title'), h('ul', { class: 'vss-report' }, st.report.map((r) => h('li', { text: reportLine(r) })))));
-  // NFR-5: every object reachable from the keyboard
-  ui.panel.append(section(t('objects'),
-    h('ul', { class: 'vss-objects' }, d.nodes.map((n) => h('li', {}, h('button', { type: 'button', class: 'vss-link', text: '▭ ' + (n.name || n.id), onclick: () => { select('node', n.id); centerOn(n.position.x, n.position.y); } }))),
-      d.flows.map((f) => h('li', {}, h('button', { type: 'button', class: 'vss-link', text: '→ ' + (f.name || f.id), onclick: () => select('flow', f.id) }))))));
+  ui.panel.append(objectsSection());
 }
+/** NFR-5 and the UX review: every object reachable from the keyboard, with search, under any selection. */
+function objectsSection() {
+  const d = st.doc;
+  const objFilter = h('input', { type: 'search', class: 'vss-obj-search', placeholder: t('objects.search'), 'aria-label': t('objects.search'),
+    oninput: (e) => { const q = e.target.value.trim().toLowerCase(); ui.panel.querySelectorAll('.vss-objects li').forEach((li) => { li.hidden = !!q && !li.textContent.toLowerCase().includes(q); }); } });
+  return section(t('objects'), objFilter,
+    h('ul', { class: 'vss-objects' }, d.nodes.map((n) => h('li', {}, h('button', { type: 'button', class: 'vss-link', text: '▭ ' + (n.name || n.id), onclick: () => { select('node', n.id); centerOn(n.position.x, n.position.y); } }))),
+      d.flows.map((f) => h('li', {}, h('button', { type: 'button', class: 'vss-link', text: '→ ' + (f.name || f.id), onclick: () => select('flow', f.id) }))),
+      d.texts.map((x) => h('li', {}, h('button', { type: 'button', class: 'vss-link', text: 'T ' + (String(x.text || '').split(String.fromCharCode(10))[0].slice(0, 40) || x.id), onclick: () => { select('text', x.id); centerOn(x.x, x.y); } })))));
+}
+
 function renderChromeTitle() { ui.title.textContent = st.doc.schema.title || t('untitled'); }
 function reportLine(r) { const [k, ...rest] = r.split(':'); return t('report.' + k, { x: rest.join(':') }); }
+
+/** Converter actions, one definition for the canvas bar and the inspector (UX review, wave 2). */
+function converterActions(n) {
+  return [
+    { sym: '+', label: t('a.next'), fn: () => addNext(n), main: true },
+    { sym: '↗', label: t('a.connect'), fn: () => startConnect(n.id), main: true, ic: 'link' },
+    { sym: '⇢', label: t('a.extOut'), fn: () => addExternal(n, 'out'), main: true },
+    { sym: '⇠', label: t('a.extIn'), fn: () => addExternal(n, 'in') },
+    { sym: '×', label: t('delete'), fn: () => deleteNode(n.id), danger: true, main: true },
+  ];
+}
+
+/** "3 days ago" in the page language. */
+function ago(iso) {
+  const ms = Date.parse(iso || '');
+  if (!Number.isFinite(ms)) return '';
+  const s2 = (ms - Date.now()) / 1000, rtf = new Intl.RelativeTimeFormat(LOC, { numeric: 'auto' });
+  for (const [u, n] of [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]]) if (Math.abs(s2) >= n) return rtf.format(Math.round(s2 / n), u);
+  return rtf.format(0, 'minute');
+}
 
 function panelNode(n) {
   const d = st.doc;
@@ -632,9 +778,7 @@ function panelNode(n) {
       fText(t('f.bpmn'), n.bpmn_link, (v) => { n.bpmn_link = v; }, { type: 'url' }),
       fText(t('f.link'), n.link, (v) => { n.link = v; }, { type: 'url' }),
       linkOut(n.bpmn_link), linkOut(n.link),
-      h('div', { class: 'vss-actions' },
-        btn(t('a.next'), () => addNext(n), { cls: 'vss-btn-sm' }), btn(t('a.extOut'), () => addExternal(n, 'out'), { cls: 'vss-btn-sm' }),
-        btn(t('a.extIn'), () => addExternal(n, 'in'), { cls: 'vss-btn-sm' }), btn(t('a.connect'), () => startConnect(n.id), { cls: 'vss-btn-sm', ic: 'link' }))),
+      h('div', { class: 'vss-actions' }, converterActions(n).filter((a) => !a.danger).map((a) => btn(a.label, a.fn, { cls: 'vss-btn-sm', ic: a.ic })))),
     section(t('types.title'), typeList, btn(t('types.add'), () => typeEditor(n, null), { cls: 'vss-btn-sm' }), h('div', { class: 'vss-type-editor' })),
     h('div', { class: 'vss-section' }, btn(t('p.deleteConverter'), () => deleteNode(n.id), { cls: 'vss-btn-danger' })));
 }
@@ -665,7 +809,8 @@ function panelFlow(f) {
   const nodeOpts = [['', t('external')], ...d.nodes.map((n) => [n.id, n.name || n.id])];
   const src = f.source_node_id ? C.nodeById(d, f.source_node_id) : null, tgt = f.target_node_id ? C.nodeById(d, f.target_node_id) : null;
   const typeLabel = { internal: t('ft.internal'), external_in: t('ft.extIn'), external_out: t('ft.extOut') }[f.type];
-  ui.panel.append(section(t('p.flow'), idLine(f.id),
+  const blocked = st.layout && st.layout.flows.get(f.id)?.blocked;
+  ui.panel.append(section(t('p.flow'), idLine(f.id), blocked ? h('p', { class: 'vss-warn', text: t('geo.blocked') }) : null,
     fText(t('f.name'), f.name, (v) => { f.name = v; }),
     fText(t('f.description'), f.description, (v) => { f.description = v; }, { area: true, rows: 2 }),
     h('div', { class: 'vss-row' }, fText(t('f.value'), f.value, (v) => { f.value = v; }, { type: 'number' }), fText(t('f.unit'), f.unit, (v) => { f.unit = v; })),
@@ -704,6 +849,7 @@ function panelLedger(f) {
   const sec = section(t('ledger.title'));
   if (!f.source_node_id && !f.target_node_id) { sec.append(h('p', { class: 'vss-hint', text: t('vet.unbound') })); return sec; }
   const list = ((st.doc.integrations.ledger || {}).transfers || {})[f.id] || [];
+  if (list.length) { const last = list.map((x) => (x.summary || {}).occurredAt).filter(Boolean).sort().pop(); sec.append(h('p', { class: 'vss-sum' }, h('b', { text: t('ledger.count', { n: list.length }) }), last ? ' · ' + ago(last) : '')); }
   sec.append(h('p', { class: 'vss-hint', text: t('ledger.hint') }));
   if (list.length) sec.append(h('ul', { class: 'vss-ledger-list' }, list.map((x) => h('li', { text: transferLine(x.summary || {}) }))));
   else sec.append(h('p', { class: 'vss-hint', text: t('ledger.none') }));
@@ -789,6 +935,9 @@ function panelVet(f) {
   const sec = section(t('vet.title'));
   if (!f.source_node_id && !f.target_node_id) { sec.append(h('p', { class: 'vss-hint', text: t('vet.unbound') })); return sec; }
   if (b) {
+    const tt0 = b.totals || {};
+    const pr0 = b.priorityKind === 'positive_infinity' ? '∞' : b.priorityKind === 'negative_infinity' ? '-∞' : tt0.priority === null || tt0.priority === undefined ? t('vet.notEstimated') : fmt(tt0.priority);
+    sec.append(h('p', { class: 'vss-sum' + (b.stale ? ' is-stale' : '') }, h('b', { text: t('vet.priority') + ': ' + pr0 }), ' · ' + t('vet.count') + ' ' + (tt0.count ?? 0) + (b.receivedAt ? ' · ' + ago(b.receivedAt) : '') + (b.stale ? ' · ' + t('vet.staleShort') : '')));
     const tt = b.totals || {};
     const pr = b.priorityKind === 'positive_infinity' ? '∞' : b.priorityKind === 'negative_infinity' ? '-∞' : tt.priority === null || tt.priority === undefined ? t('vet.notEstimated') : fmt(tt.priority);
     const ax = (k) => { const a = (b.axes || {})[k] || {}; const l = a.label || {}; return (l[LOC] || l.en || Object.values(l)[0] || k) + (a.unit ? ', ' + a.unit : ''); };
@@ -820,18 +969,40 @@ async function openVet(f) {
   const b = st.doc.integrations.vet.bindings[f.id];
   const types = C.flowTypes(st.doc, f) || [];
   const prefix = LOC === 'en' ? '' : '/' + LOC;
-  const frame = h('iframe', { class: 'vss-vet-frame', src: root.dataset.vet ? root.dataset.vet + '?v=' + V : prefix + '/tools/vet/embed.php?v=' + V, title: 'VET' });
-  const status = h('p', { class: 'vss-hint', text: t('vet.loading') });
-  let state = 'loading', timer = null;
+  const src = root.dataset.vet ? root.dataset.vet + '?v=' + V : prefix + '/tools/vet/embed.php?v=' + V;
+  const frame = h('iframe', { class: 'vss-vet-frame', title: 'VET' });
+  const status = h('p', { class: 'vss-hint', role: 'status' });
+  // HostBridge states: preview -> loading -> editing -> complete | cancelled | failed (Retry goes back to loading)
+  let state = 'preview', timer = null;
+  const retry = btn(t('vet.retry'), () => load(), { cls: 'vss-btn-sm' });
+  retry.hidden = true;
+  const side = (id) => { const n = id && st.doc.nodes.find((x) => x.id === id); return n ? n.name || n.id : t('vet.externalSide'); };
+  const preview = h('div', { class: 'vss-vet-preview' },
+    h('p', { text: t('vet.previewLead', { from: side(f.source_node_id), to: side(f.target_node_id) }) }),
+    h('ul', {}, h('li', { text: t('vet.previewTypes', { n: types.length }) }),
+      h('li', { text: b ? t('vet.previewItems', { n: (b.items || []).length }) : t('vet.previewNew') }),
+      h('li', { text: srv ? t('vet.previewServer') : t('vet.previewSolo') })),
+    h('div', { class: 'vss-row' }, btn(t('vet.start'), () => load(), { cls: 'vss-btn-primary' }), btn(t('cancel'), () => closeVet(false))));
   const d = h('dialog', { class: 'vss-dialog vss-vet-dialog', 'aria-label': 'VET' },
-    h('div', { class: 'vss-dialog-head' }, h('strong', { text: `VET · ${f.name || f.id}` }), status, h('span', { class: 'vss-grow' }),
-      btn('', () => closeVet(true), { ic: 'x', title: t('close') })), frame);
+    h('div', { class: 'vss-dialog-head' }, h('strong', { text: `VET · ${f.name || f.id}` }), status, retry, h('span', { class: 'vss-grow' }),
+      btn('', () => closeVet(true), { ic: 'x', title: t('close') })), preview, frame);
+  frame.hidden = true;
   document.body.append(d);
   d.addEventListener('cancel', (e) => { e.preventDefault(); closeVet(true); });
   d.showModal();
-  timer = setTimeout(() => { if (state === 'loading') { status.textContent = t('vet.timeout'); state = 'failed'; } }, 20000);
-  function closeVet(ask) {
-    if (ask && state === 'editing' && !confirm(t('vet.closeAsk'))) return;
+  let seen = false;
+  try { seen = !!localStorage.getItem('vss.vetSeen'); } catch (e) { seen = false; }
+  if (b || seen) load(); // the preview is shown before the first launch only
+  function load() {
+    try { localStorage.setItem('vss.vetSeen', '1'); } catch (e) { /* private mode: the preview shows again next time */ }
+    preview.remove(); frame.hidden = false; retry.hidden = true;
+    state = 'loading'; status.textContent = t('vet.loading');
+    frame.src = 'about:blank'; frame.src = src;
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (state === 'loading') { status.textContent = t('vet.timeout'); state = 'failed'; retry.hidden = false; } }, 20000);
+  }
+  async function closeVet(ask) {
+    if (ask && state === 'editing' && !(await askBox(t('vet.closeAsk')))) return;
     window.removeEventListener('message', onMsg); clearTimeout(timer); d.close(); d.remove();
   }
   function send(type, payload) { frame.contentWindow.postMessage({ protocol: 'aevri.vet', version: 1, type, requestId, payload }, location.origin); }
@@ -839,7 +1010,9 @@ async function openVet(f) {
     if (e.origin !== location.origin || e.source !== frame.contentWindow) return; // BRIDGE-1
     const m = e.data;
     if (!m || m.protocol !== 'aevri.vet' || m.version !== 1) return;
-    if (m.type === 'vet.ready' && state === 'loading') {
+    if (m.type === 'vet.resize') return; // the dialog fills the screen, the height is not needed here
+    if (m.type === 'vet.ready' && (state === 'loading' || state === 'failed')) { // a late answer after the timeout still opens VET
+      retry.hidden = true;
       state = 'editing'; clearTimeout(timer); status.textContent = '';
       const caps = (m.payload && m.payload.capabilities) || [];
       send('vss.open', (await vetOpenPayload(f, caps)).payload);
@@ -884,7 +1057,7 @@ async function applyVetResult(flowId, p, fp) {
   if (prev && prev.resultId === ext.resultId) return; // VET-12 idempotent
   if (prev && prev.boardId === p.boardId && (ext.resultRevision || 0) < (prev.resultRevision || 0)) { toast(t('vet.olderResult')); return; } // VET-12 order
   const now = await C.fingerprint(st.doc, flow);
-  if (now !== fp && !confirm(t('vet.changedAsk'))) return; // VET-8, AT-31: the user decides
+  if (now !== fp && !(await askBox(t('vet.changedAsk')))) return; // VET-8, AT-31: the user decides
   act(() => {
     st.doc.integrations.vet.bindings[flowId] = {
       flowRef: p.flowRef, boardId: p.boardId, boardUrl: p.boardUrl || null, resultId: ext.resultId || C.uuidv7(), resultRevision: ext.resultRevision || 1,
@@ -962,7 +1135,7 @@ async function openVersions() {
   const body = h('div', { class: 'vss-versions' }, list.map((v) => h('div', { class: 'vss-row' },
     h('span', { text: new Date(v.createdAt).toLocaleString(LOC) + ' · r' + v.revision + ' · ' + t('srv.reason.' + v.reason) }), h('span', { class: 'vss-grow' }),
     btn(t('srv.restore'), async () => {
-      if (!confirm(t('srv.restoreAsk'))) return;
+      if (!(await askBox(t('srv.restoreAsk')))) return;
       try { setDoc(await srv.restore(v.id)); d.close(); toast(t('srv.restored')); } catch (e) { toast(t('srv.error') + ' ' + (e.code || '')); }
     }, { cls: 'vss-btn-sm' }))));
   const d = dialogBox(t('srv.versions'), body);
@@ -983,9 +1156,18 @@ function setDoc(doc) {
 
 // ---------- files (IO-1 ... IO-11) ----------
 
-function confirmDiscard() { return !st.dirty || confirm(t('discard.ask')); }
-function cmdNew() {
-  if (!confirmDiscard()) return;
+/** In-app confirmation instead of the browser's confirm() (UX review: native dialogs block the page and look foreign). */
+function askBox(text, yes) {
+  return new Promise((resolve) => {
+    let done = false;
+    const d = dialogBox(t('ask.title'), h('p', { class: 'vss-ask', text }), [btn(yes || t('ask.yes'), () => { done = true; d.close(); resolve(true); }, { cls: 'vss-btn-primary' })]);
+    d.addEventListener('close', () => { if (!done) resolve(false); });
+    d.querySelector('.vss-btn-primary')?.focus();
+  });
+}
+async function confirmDiscard() { return !st.dirty || askBox(t('discard.ask')); }
+async function cmdNew() {
+  if (!(await confirmDiscard())) return;
   st.doc = C.newSchema({ newTitle: t('new.title'), mainConverter: t('new.main'), extIn: t('new.extIn'), extOut: t('new.extOut'), customerValue: t('new.customerValue') });
   undoStack.length = 0; redoStack.length = 0; st.dirty = false; st.report = []; st.sel = { type: 'schema', id: null }; st.nodes.clear();
   render(); st.zoom = 1; centerOn(0, 0); // AT-01 (New): the main converter in the centre of the visible scene
@@ -995,11 +1177,14 @@ function pickFile(mode) {
   inp.addEventListener('change', async () => {
     const file = inp.files[0]; if (!file) return;
     if (file.size > 25 * 1024 * 1024) { toast(t('file.tooBig')); return; } // NFR-2
-    let res;
-    try { res = C.migrate(JSON.parse(await file.text())); }
+    let res, json;
+    try { json = JSON.parse(await file.text()); res = C.migrate(json); }
     catch (e) { showReport(t(e.message === 'newer' ? 'file.newer' : 'file.invalid'), (e.report || []).map(reportLine)); return; } // the current work stays untouched (IO-1)
+    const opts = await migrationWizard(res.report);
+    if (opts === null) return; // cancelled: nothing changes
+    if (Object.keys(opts).length) res = C.migrate(json, opts);
     if (mode === 'open') {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       pushHistory(); st.dirty = false;
       st.doc = res.doc; st.report = res.report; st.sel = { type: 'schema', id: null }; st.nodes.clear();
       render(); fit();
@@ -1013,6 +1198,28 @@ function pickFile(mode) {
     if (res.report.length) toast(t('file.report', { n: res.report.length }));
   });
   inp.click();
+}
+/** Migration wizard (IO-7, IO-8, DATA-6): an old file with ambiguous parts asks before it is opened. Resolves to the
+    migrate() options, {} when there is nothing to ask, or null when the user cancels. */
+function migrationWizard(report) {
+  const count = (k) => report.filter((r) => r.startsWith(k + ':')).length;
+  const qs = [];
+  if (count('routing-empty-as-all')) qs.push({ key: 'emptyRouting', n: count('routing-empty-as-all'), opts: ['all', 'none'] });
+  if (count('type-moved')) qs.push({ key: 'moveTypes', n: count('type-moved'), opts: [true, false] });
+  if (count('negative-value')) qs.push({ key: 'negative', n: count('negative-value'), opts: ['keep', 'abs'] });
+  if (!qs.length) return Promise.resolve({});
+  return new Promise((resolve) => {
+    const res = {};
+    let done = false;
+    const body = h('div', { class: 'vss-form' }, h('p', { text: t('wiz.lead') }), qs.map((q) => {
+      res[q.key] = q.opts[0];
+      return h('fieldset', { class: 'vss-wiz' }, h('legend', { text: t('wiz.' + q.key, { n: q.n }) }),
+        q.opts.map((v, i) => h('label', { class: 'vss-radio' }, h('input', { type: 'radio', name: 'vss-wiz-' + q.key, checked: i === 0 || null, onchange: () => { res[q.key] = v; } }),
+          h('span', { text: t('wiz.' + q.key + '.' + String(v)) + (i === 0 ? ' ' + t('wiz.recommended') : '') }))));
+    }));
+    const d = dialogBox(t('wiz.title'), body, [btn(t('wiz.open'), () => { done = true; d.close(); resolve(res); }, { cls: 'vss-btn-primary' })]);
+    d.addEventListener('close', () => { if (!done) resolve(null); });
+  });
 }
 function showReport(title, lines) {
   const d = h('dialog', { class: 'vss-dialog' }, h('div', { class: 'vss-dialog-head' }, h('strong', { text: title })), h('ul', { class: 'vss-report' }, lines.map((l) => h('li', { text: l }))),
@@ -1029,32 +1236,50 @@ function exportJson() {
   download(new Blob([C.serialize(st.doc)], { type: 'application/json' }), baseName() + '.vss.json');
   st.dirty = false; st.exported = true; renderChrome(); // SAVE-4: "JSON exported", not "saved to the institute"
 }
-/** PNG from a clean render of the whole schema in world coordinates (PNG-1 ... PNG-4). */
-function exportPng() {
+/** A clean render of the whole schema in world coordinates (PNG-1 ... PNG-4): no selection, no hit areas. */
+function cleanSvg() {
   const keepSel = st.sel, keepNodes = st.nodes;
   st.sel = { type: 'schema', id: null }; st.nodes = new Set();
   renderDiagram();
   const bb = ui.content.getBBox();
   const clone = ui.content.cloneNode(true);
   st.sel = keepSel; st.nodes = keepNodes; renderDiagram();
-  if (!bb.width || !bb.height) { toast(t('png.empty')); return; }
+  if (!bb.width || !bb.height) return null;
   clone.querySelectorAll('.vss-hit,.vss-text-hit').forEach((x) => x.remove());
   const M = 50, foot = 34;
   const W = Math.ceil(bb.width + M * 2), H = Math.ceil(bb.height + M * 2 + foot);
-  const scale = W * H * 4 > 8000 * 8000 ? 1 : 2;
-  if (W * scale > 16000 || H * scale > 16000) { toast(t('png.tooBig')); return; }
   const svg = s('svg', { xmlns: NS, width: W, height: H, viewBox: `${bb.x - M} ${bb.y - M} ${W} ${H}` });
   const style = s('style'); style.textContent = `text{font-family:Inter,"Segoe UI",system-ui,sans-serif}.vss-label text{font-size:11px;fill:#1f2933}.vss-label text.is-vet{font-size:10px;fill:#176B68;font-weight:600}`;
   svg.append(style, s('rect', { x: bb.x - M, y: bb.y - M, width: W, height: H, fill: '#ffffff' }), clone);
   const brand = s('text', { x: bb.x - M + 14, y: bb.y - M + H - 14, 'font-size': 13, 'font-weight': 700, fill: '#1a365d' }); brand.textContent = 'Æilus VSS';
   svg.append(brand);
-  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' }));
+  return { text: new XMLSerializer().serializeToString(svg), W, H };
+}
+function exportSvg() {
+  const c = cleanSvg();
+  if (!c) { toast(t('png.empty')); return; }
+  download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + c.text], { type: 'image/svg+xml' }), baseName() + '.svg');
+}
+/** PNG with a chosen size (1x, 2x, 3x); the browser canvas limit is checked before drawing. */
+function exportPng() {
+  const c = cleanSvg();
+  if (!c) { toast(t('png.empty')); return; }
+  const fits = (k) => c.W * k <= 16000 && c.H * k <= 16000 && c.W * c.H * k * k <= 16000 * 16000 / 2;
+  let scale = fits(2) ? 2 : 1;
+  if (!fits(1)) { toast(t('png.tooBig')); return; }
+  const opts = [1, 2, 3].filter(fits).map((k) => h('label', { class: 'vss-radio' }, h('input', { type: 'radio', name: 'vss-png', checked: k === scale || null, onchange: () => { scale = k; } }),
+    h('span', { text: `${k}× · ${c.W * k} × ${c.H * k} px` })));
+  const d = dialogBox(t('png.title'), h('div', { class: 'vss-form' }, h('p', { class: 'vss-hint', text: t('png.sizeHint') }), opts),
+    [btn(t('menu.exportPng'), () => { d.close(); drawPng(c, scale); }, { cls: 'vss-btn-primary' })]);
+}
+function drawPng(c, scale) {
+  const url = URL.createObjectURL(new Blob([c.text], { type: 'image/svg+xml;charset=utf-8' }));
   const img = new Image();
   img.onload = () => {
-    const c = document.createElement('canvas'); c.width = W * scale; c.height = H * scale;
-    const ctx = c.getContext('2d'); ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+    const cv = document.createElement('canvas'); cv.width = c.W * scale; cv.height = c.H * scale;
+    const ctx = cv.getContext('2d'); ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
     URL.revokeObjectURL(url);
-    c.toBlob((blob) => { if (!blob) { toast(t('png.failed')); return; } download(blob, baseName() + '.png'); }, 'image/png');
+    cv.toBlob((blob) => { if (!blob) { toast(t('png.failed')); return; } download(blob, baseName() + '.png'); }, 'image/png');
   };
   img.onerror = () => { URL.revokeObjectURL(url); toast(t('png.failed')); };
   img.src = url;

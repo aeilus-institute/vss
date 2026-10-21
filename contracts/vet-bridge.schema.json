@@ -13,9 +13,10 @@
     "payload": { "type": "object" }
   },
   "allOf": [
-    { "if": { "properties": { "type": { "const": "vet.ready" } } }, "then": { "properties": { "payload": { "properties": { "capabilities": { "type": "array", "items": { "enum": ["vss-board-snapshot-v1"] } } } } } } },
+    { "if": { "properties": { "type": { "const": "vet.ready" } } }, "then": { "properties": { "payload": { "properties": { "capabilities": { "type": "array", "items": { "enum": ["vss-board-snapshot-v1", "ledger-receiver-v1", "resize-v1"] } } } } } } },
     { "if": { "properties": { "type": { "const": "vss.open" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/open" } } } },
-    { "if": { "properties": { "type": { "const": "vet.result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/result" } } } }
+    { "if": { "properties": { "type": { "const": "vet.result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/result" } } } },
+    { "if": { "properties": { "type": { "const": "vet.resize" } } }, "then": { "properties": { "payload": { "type": "object", "required": ["height"], "description": "content height in CSS pixels; sent after vet.ready and when it changes by more than 8 px; a host may ignore it", "properties": { "height": { "type": "integer", "minimum": 0 } } } } } }
   ],
   "$defs": {
     "node": { "type": ["object", "null"], "properties": { "id": { "type": "string" }, "name": { "type": "string" } } },

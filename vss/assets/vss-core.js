@@ -137,8 +137,9 @@ export function deleteType(doc, typeId) {
 const KNOWN_ROOT = ['format', 'schemaVersion', 'schema', 'nodes', 'flows', 'elements', 'texts', 'integrations', 'extensions'];
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
-/** Checks and migrates a document in separate memory. Throws Error with .report (array of lines) when it cannot be opened. */
-export function migrate(input) {
+/** Checks and migrates a document in separate memory. Throws Error with .report (array of lines) when it cannot be opened.
+    opts (the migration wizard, IO-7 / IO-8 / DATA-6): emptyRouting 'all' | 'none', moveTypes true | false, negative 'keep' | 'abs'. */
+export function migrate(input, opts = {}) {
   const report = [];
   const fail = (msg) => { const e = new Error('invalid'); e.report = [...report, msg]; throw e; };
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('not-object');
@@ -183,7 +184,8 @@ export function migrate(input) {
     if (!f.source_node_id && !f.target_node_id && !(f.attributes && f.attributes.is_unbound)) { f.attributes = { ...(f.attributes || {}), is_unbound: true }; report.push('unbound:' + f.id); }
     f.name = String(f.name ?? ''); f.description = String(f.description ?? ''); f.unit = String(f.unit ?? 'Æ');
     let v = num(Number(f.value), 0);
-    if (v < 0) report.push('negative-value:' + f.id); // kept as legacy value; width uses the magnitude (GEO-9)
+    if (v < 0 && opts.negative === 'abs') { v = -v; report.push('negative-fixed:' + f.id); }
+    else if (v < 0) report.push('negative-value:' + f.id); // kept as legacy value; width uses the magnitude (GEO-9)
     f.value = v;
     if (!/^#[0-9a-f]{6}$/i.test(String(f.color || ''))) f.color = null;
     f.show_label = f.show_label === true;
@@ -192,6 +194,7 @@ export function migrate(input) {
     if (!legacy && (f.routing_mode === 'all' || f.routing_mode === 'selected')) { if (!Array.isArray(f.element_type_ids)) f.element_type_ids = []; }
     else if (!Array.isArray(f.element_type_ids)) { f.routing_mode = 'all'; f.element_type_ids = []; }
     else if (f.element_type_ids.length) f.routing_mode = 'selected';
+    else if (opts.emptyRouting === 'none') { f.routing_mode = 'selected'; report.push('routing-empty-as-none:' + f.id); }
     else { f.routing_mode = 'all'; report.push('routing-empty-as-all:' + f.id); }
     f.element_type_ids = f.element_type_ids.map(String);
     autoType(f);
@@ -204,11 +207,11 @@ export function migrate(input) {
     e.attributes = e.attributes && typeof e.attributes === 'object' ? e.attributes : {};
     if (e.location === 'in_flow') { // IO-8: move to the producing converter when the flow has one
       const f = doc.flows.find((x) => x.id === e.flow_id);
-      if (f && f.source_node_id) {
+      if (f && f.source_node_id && opts.moveTypes !== false) {
         e.location = 'in_node'; e.node_id = f.source_node_id; e.flow_id = null;
         if (f.routing_mode === 'selected' && !f.element_type_ids.includes(e.id)) f.element_type_ids.push(e.id);
         report.push('type-moved:' + e.id);
-      } else report.push('type-in-flow-kept:' + e.id);
+      } else report.push((f && f.source_node_id ? 'type-kept:' : 'type-in-flow-kept:') + e.id);
     } else {
       e.location = 'in_node';
       if (!nodeIds.has(String(e.node_id))) fail('dangling-type:' + e.id + ':' + e.node_id);
